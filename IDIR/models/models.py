@@ -14,7 +14,7 @@ class ImplicitRegistrator:
     """This is a class for registrating implicitly represented images."""
 
     def __call__(
-        self, coordinate_tensor=None, output_shape=(28, 28), dimension=0, slice_pos=0
+        self, coordinate_tensor=None, moving_image = None, output_shape=(28, 28), dimension=0, slice_pos=0
     ):
         """Return the image-values for the given input-coordinates."""
 
@@ -29,7 +29,8 @@ class ImplicitRegistrator:
         # Shift coordinates by 1/n * v
         coord_temp = torch.add(output, coordinate_tensor)
 
-        transformed_image = self.transform_no_add(coord_temp)
+        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image)
+
         return (
             transformed_image.cpu()
             .detach()
@@ -227,9 +228,14 @@ class ImplicitRegistrator:
         self.moving_image = moving_image
         self.fixed_image = fixed_image
 
-        self.possible_coordinate_tensor = general.make_masked_coordinate_tensor(
-            self.mask, self.fixed_image.shape
-        )
+        if self.mask is not None:
+            self.possible_coordinate_tensor = general.make_masked_coordinate_tensor(
+                self.mask, self.fixed_image.shape
+            )
+        else:
+            self.possible_coordinate_tensor = general.make_coordinate_tensor(
+                self.fixed_image.shape
+            )
 
         if self.gpu:
             self.moving_image = self.moving_image.cuda()
@@ -259,7 +265,7 @@ class ImplicitRegistrator:
 
         self.args["lr"] = 0.00001
         self.args["batch_size"] = 10000
-        self.args["layers"] = [3, 256, 256, 256, 3]
+        self.args["layers"] = [2, 256, 256, 256, 2]
         self.args["velocity_steps"] = 1
 
         # Define argument defaults specific to this class
@@ -316,11 +322,10 @@ class ImplicitRegistrator:
         output = coord_temp
 
         transformed_image = self.transform_no_add(coord_temp)
-        fixed_image = general.fast_trilinear_interpolation(
+        fixed_image = general.fast_bilinear_interpolation(
             self.fixed_image,
             coordinate_tensor[:, 0],
             coordinate_tensor[:, 1],
-            coordinate_tensor[:, 2],
         )
 
         # Compute the loss
@@ -373,11 +378,10 @@ class ImplicitRegistrator:
 
         # From relative to absolute
         transformation = torch.add(transformation, coordinate_tensor)
-        return general.fast_trilinear_interpolation(
+        return general.fast_bilinear_interpolation(
             moving_image,
             transformation[:, 0],
             transformation[:, 1],
-            transformation[:, 2],
         )
 
     def transform_no_add(self, transformation, moving_image=None, reshape=False):
@@ -387,11 +391,10 @@ class ImplicitRegistrator:
         if moving_image is None:
             moving_image = self.moving_image
         # print('GET MOVING')
-        return general.fast_trilinear_interpolation(
+        return general.fast_bilinear_interpolation(
             moving_image,
             transformation[:, 0],
             transformation[:, 1],
-            transformation[:, 2],
         )
 
     def fit(self, epochs=None, red_blue=False):
