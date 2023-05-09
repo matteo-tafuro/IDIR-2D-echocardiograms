@@ -15,7 +15,7 @@ class ImplicitRegistrator:
     """This is a class for registrating implicitly represented images."""
 
     def __call__(
-        self, moving_image = None, fast=False, return_dvf=False
+        self, moving_image=None, fast=False, return_dvf=False, ftype='image'
     ):
         """Return the image-values for the given input-coordinates."""
 
@@ -26,10 +26,14 @@ class ImplicitRegistrator:
         # Shift coordinates by 1/n * v
         coord_temp = torch.add(output, coordinate_tensor)
 
-        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image, fast = fast)
+        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image, fast = fast).cpu().detach().numpy()
 
         if fast:
             transformed_image = transformed_image.reshape(moving_image.shape)
+        if ftype == 'mask':
+            transformed_image = transformed_image.astype(np.uint8)
+        elif ftype == 'image':
+            transformed_image = (transformed_image / 255.0).astype(np.float32)
         
         if return_dvf:
 
@@ -42,13 +46,13 @@ class ImplicitRegistrator:
             # stack these two in the first dimension
             displaced_grid = np.stack([x_indices, y_indices], axis=0)
 
-            # I think if I now subtract an identity grid, I get the dvf
+            # if I now subtract an identity grid, I get the dvf
             identity_grid = np.indices(moving_image.shape).astype(np.float32)
             dvf = displaced_grid - identity_grid
 
-            return transformed_image.cpu().detach().numpy(), dvf
+            return transformed_image, dvf
 
-        return transformed_image.cpu().detach().numpy()
+        return transformed_image
     
 
     def __init__(self, moving_image, fixed_image, **kwargs):
