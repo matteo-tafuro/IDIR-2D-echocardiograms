@@ -2,128 +2,11 @@ import numpy as np
 import os
 import torch
 import SimpleITK as sitk
-
-
-def compute_landmark_accuracy(landmarks_pred, landmarks_gt, voxel_size):
-    landmarks_pred = np.round(landmarks_pred)
-    landmarks_gt = np.round(landmarks_gt)
-
-    difference = landmarks_pred - landmarks_gt
-    difference = np.abs(difference)
-    difference = difference * voxel_size
-
-    means = np.mean(difference, 0)
-    stds = np.std(difference, 0)
-
-    difference = np.square(difference)
-    difference = np.sum(difference, 1)
-    difference = np.sqrt(difference)
-
-    means = np.append(means, np.mean(difference))
-    stds = np.append(stds, np.std(difference))
-
-    means = np.round(means, 2)
-    stds = np.round(stds, 2)
-
-    means = means[::-1]
-    stds = stds[::-1]
-
-    return means, stds
-
-
-def compute_landmarks(network, landmarks_pre, image_size):
-    scale_of_axes = [(0.5 * s) for s in image_size]
-
-    coordinate_tensor = torch.FloatTensor(landmarks_pre / (scale_of_axes)) - 1.0
-
-    output = network(coordinate_tensor.cuda())
-
-    delta = output.cpu().detach().numpy() * (scale_of_axes)
-
-    return landmarks_pre + delta, delta
-
-
-def load_image_DIRLab(variation=1, folder=r"D:\Data\DIRLAB\Case"):
-    # Size of data, per image pair
-    image_sizes = [
-        0,
-        [94, 256, 256],
-        [112, 256, 256],
-        [104, 256, 256],
-        [99, 256, 256],
-        [106, 256, 256],
-        [128, 512, 512],
-        [136, 512, 512],
-        [128, 512, 512],
-        [128, 512, 512],
-        [120, 512, 512],
-    ]
-
-    # Scale of data, per image pair
-    voxel_sizes = [
-        0,
-        [2.5, 0.97, 0.97],
-        [2.5, 1.16, 1.16],
-        [2.5, 1.15, 1.15],
-        [2.5, 1.13, 1.13],
-        [2.5, 1.1, 1.1],
-        [2.5, 0.97, 0.97],
-        [2.5, 0.97, 0.97],
-        [2.5, 0.97, 0.97],
-        [2.5, 0.97, 0.97],
-        [2.5, 0.97, 0.97],
-    ]
-
-    shape = image_sizes[variation]
-
-    folder = folder + str(variation) + r"Pack" + os.path.sep
-
-    # Images
-    dtype = np.dtype(np.int16)
-
-    with open(folder + r"Images\case" + str(variation) + "_T00_s.img", "rb") as f:
-        data = np.fromfile(f, dtype)
-    image_insp = data.reshape(shape)
-
-    with open(folder + r"Images\case" + str(variation) + "_T50_s.img", "rb") as f:
-        data = np.fromfile(f, dtype)
-    image_exp = data.reshape(shape)
-
-    imgsitk_in = sitk.ReadImage(folder + r"Masks\case" + str(variation) + "_T00_s.mhd")
-
-    mask = np.clip(sitk.GetArrayFromImage(imgsitk_in), 0, 1)
-
-    image_insp = torch.FloatTensor(image_insp)
-    image_exp = torch.FloatTensor(image_exp)
-
-    # Landmarks
-    with open(
-        folder + r"ExtremePhases\Case" + str(variation) + "_300_T00_xyz.txt"
-    ) as f:
-        landmarks_insp = np.array(
-            [list(map(int, line[:-1].split("\t")[:3])) for line in f.readlines()]
-        )
-
-    with open(
-        folder + r"ExtremePhases\Case" + str(variation) + "_300_T50_xyz.txt"
-    ) as f:
-        landmarks_exp = np.array(
-            [list(map(int, line[:-1].split("\t")[:3])) for line in f.readlines()]
-        )
-
-    landmarks_insp[:, [0, 2]] = landmarks_insp[:, [2, 0]]
-    landmarks_exp[:, [0, 2]] = landmarks_exp[:, [2, 0]]
-
-    return (
-        image_insp,
-        image_exp,
-        landmarks_insp,
-        landmarks_exp,
-        mask,
-        voxel_sizes[variation],
-    )
+import torch.nn.functional as F
 
 def fast_bilinear_interpolation(input_array, x_indices, y_indices):
+
+    # Rescale the x and y indices to match the input array shape
     x_indices = (x_indices + 1) * (input_array.shape[0] - 1) * 0.5
     y_indices = (y_indices + 1) * (input_array.shape[1] - 1) * 0.5
 
@@ -147,6 +30,39 @@ def fast_bilinear_interpolation(input_array, x_indices, y_indices):
         + input_array[x1, y1] * x * y
     )
     return output
+
+def bilinear_interpolation(input_array, x_indices, y_indices, mode='nearest'):
+
+    assert mode in ['nearest', 'bilinear']
+
+    # Rescale the x and y indices to match the input array shape
+    x_indices = (x_indices + 1) * (input_array.shape[0] - 1) * 0.5
+    y_indices = (y_indices + 1) * (input_array.shape[1] - 1) * 0.5
+
+    # Reshape the x and y indices to match the input array shape and move to CPU
+    x_indices = x_indices.reshape(input_array.shape).detach().cpu()
+    y_indices = y_indices.reshape(input_array.shape).detach().cpu()
+
+    coord_grid = torch.stack([y_indices, x_indices], axis=2).unsqueeze(0).cuda()
+    im_shape = input_array.shape
+
+    max_extent = (
+        torch.tensor(
+            im_shape[::-1], dtype=coord_grid.dtype, device=coord_grid.device
+        )
+        - 1
+    )
+
+    coord_grid = 2 * (coord_grid / max_extent) - 1
+
+    output = F.grid_sample(
+        input_array.unsqueeze(0).unsqueeze(0),
+        coord_grid,
+        mode=mode,
+        padding_mode='border',
+        align_corners=True,
+    )
+    return output.squeeze()
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

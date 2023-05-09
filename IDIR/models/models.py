@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,29 +15,41 @@ class ImplicitRegistrator:
     """This is a class for registrating implicitly represented images."""
 
     def __call__(
-        self, coordinate_tensor=None, moving_image = None, output_shape=(28, 28), dimension=0, slice_pos=0
+        self, moving_image = None, fast=False, return_dvf=False
     ):
         """Return the image-values for the given input-coordinates."""
 
-        # Use standard coordinate tensor if none is given
-        if coordinate_tensor is None:
-            coordinate_tensor = self.make_coordinate_slice(
-                output_shape, dimension, slice_pos
-            )
+        coordinate_tensor = general.make_coordinate_tensor(dims=moving_image.shape)
 
         output = self.network(coordinate_tensor)
 
         # Shift coordinates by 1/n * v
         coord_temp = torch.add(output, coordinate_tensor)
 
-        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image)
+        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image, fast = fast)
 
-        return (
-            transformed_image.cpu()
-            .detach()
-            .numpy()
-            .reshape(output_shape[0], output_shape[1])
-        )
+        if fast:
+            transformed_image = transformed_image.reshape(moving_image.shape)
+        
+        if return_dvf:
+
+            x_indices, y_indices = coord_temp[:, 0],  coord_temp[:, 1],
+            x_indices = (x_indices + 1) * (moving_image.shape[0] - 1) * 0.5
+            y_indices = (y_indices + 1) * (moving_image.shape[1] - 1) * 0.5
+
+            x_indices = x_indices.reshape(moving_image.shape).detach().cpu()
+            y_indices = y_indices.reshape(moving_image.shape).detach().cpu()
+            # stack these two in the first dimension
+            displaced_grid = np.stack([x_indices, y_indices], axis=0)
+
+            # I think if I now subtract an identity grid, I get the dvf
+            identity_grid = np.indices(moving_image.shape).astype(np.float32)
+            dvf = displaced_grid - identity_grid
+
+            return transformed_image.cpu().detach().numpy(), dvf
+
+        return transformed_image.cpu().detach().numpy()
+    
 
     def __init__(self, moving_image, fixed_image, **kwargs):
         """Initialize the learning model."""
@@ -74,6 +87,13 @@ class ImplicitRegistrator:
             else self.args["weight_init"]
         )
         self.omega = kwargs["omega"] if "omega" in kwargs else self.args["omega"]
+
+        self.save_model = (
+            kwargs["save_model"]
+            if "save_model" in kwargs
+            else self.args["save_model"]
+        )
+
         self.save_folder = (
             kwargs["save_folder"]
             if "save_folder" in kwargs
@@ -86,8 +106,8 @@ class ImplicitRegistrator:
         )
 
         # Make folder for output
-        if not self.save_folder == "" and not os.path.isdir(self.save_folder):
-            os.mkdir(self.save_folder)
+        if self.save_model and not self.save_folder == "" and not os.path.isdir(self.save_folder):
+            os.makedirs(self.save_folder)
 
         # Add slash to divide folder and filename
         self.save_folder += "/"
@@ -120,7 +140,17 @@ class ImplicitRegistrator:
                     )
                 )
         else:
-            self.network = torch.load(self.network_from_file)
+            if self.network_type == "MLP":
+                self.network = networks.MLP(self.layers)
+            else:
+                self.network = networks.Siren(self.layers, self.weight_init, self.omega)
+            if self.verbose:
+                print(
+                    "Network contains {} trainable parameters.".format(
+                        general.count_parameters(self.network)
+                    )
+                )
+            self.network.load_state_dict(torch.load(self.network_from_file))
             if self.gpu:
                 self.network.cuda()
 
@@ -290,6 +320,7 @@ class ImplicitRegistrator:
         self.args["log_interval"] = self.args["epochs"] // 4
         self.args["verbose"] = True
         self.args["save_folder"] = "output"
+        self.args["save_model"] = False
 
         self.args["network_type"] = "MLP"
 
@@ -321,7 +352,7 @@ class ImplicitRegistrator:
         coord_temp = torch.add(output, coordinate_tensor)
         output = coord_temp
 
-        transformed_image = self.transform_no_add(coord_temp)
+        transformed_image = self.transform_no_add(coord_temp, fast=True)
         fixed_image = general.fast_bilinear_interpolation(
             self.fixed_image,
             coordinate_tensor[:, 0],
@@ -384,18 +415,28 @@ class ImplicitRegistrator:
             transformation[:, 1],
         )
 
-    def transform_no_add(self, transformation, moving_image=None, reshape=False):
+    def transform_no_add(self, transformation, moving_image=None, fast=True, mode='nearest'):
         """Transform moving image given a transformation."""
 
         # If no moving image is given use the standard one
         if moving_image is None:
             moving_image = self.moving_image
-        # print('GET MOVING')
-        return general.fast_bilinear_interpolation(
-            moving_image,
-            transformation[:, 0],
-            transformation[:, 1],
-        )
+
+        if fast:
+            output = general.fast_bilinear_interpolation(
+                moving_image,
+                transformation[:, 0],
+                transformation[:, 1],
+            )
+        else:
+            output = general.bilinear_interpolation(
+                moving_image,
+                transformation[:, 0],
+                transformation[:, 1],
+                mode=mode
+            )
+
+        return output
 
     def fit(self, epochs=None, red_blue=False):
         """Train the network."""
@@ -415,3 +456,7 @@ class ImplicitRegistrator:
         # Perform training iterations
         for i in tqdm.tqdm(range(epochs)):
             self.training_iteration(i)
+
+        # Save the model
+        if self.save_model:
+            torch.save(self.network.state_dict(), os.path.join(self.save_folder, f"trained_model.pt"))
