@@ -26,7 +26,7 @@ class ImplicitRegistrator:
         # Shift coordinates by 1/n * v
         coord_temp = torch.add(output, coordinate_tensor)
 
-        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image, fast = fast).cpu().detach().numpy()
+        transformed_image = self.transform_no_add(coord_temp, moving_image = moving_image.cuda(), fast = fast).cpu().detach().numpy()
 
         if fast:
             transformed_image = transformed_image.reshape(moving_image.shape)
@@ -307,14 +307,14 @@ class ImplicitRegistrator:
         self.args["alpha_output"] = 0.2
         self.args["reg_norm_output"] = 1
 
-        self.args["jacobian_regularization"] = False
-        self.args["alpha_jacobian"] = 0.05
+        self.args["jacobian_regularization"] = True
+        self.args["alpha_jacobian"] = 1
 
         self.args["hyper_regularization"] = False
         self.args["alpha_hyper"] = 0.25
 
-        self.args["bending_regularization"] = False
-        self.args["alpha_bending"] = 10.0
+        self.args["bending_regularization"] = True
+        self.args["alpha_bending"] = 5
 
         self.args["image_shape"] = (200, 200)
 
@@ -458,7 +458,8 @@ class ImplicitRegistrator:
             self.data_loss_list = [0 for _ in range(epochs)]
 
         # Perform training iterations
-        for i in tqdm.tqdm(range(epochs)):
+        iterator = tqdm.tqdm(range(epochs)) if self.verbose else range(epochs)
+        for i in iterator:
             self.training_iteration(i)
 
         # Save the model

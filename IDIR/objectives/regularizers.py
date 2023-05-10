@@ -34,14 +34,8 @@ def compute_hyper_elastic_loss(
     area_loss = torch.sum(area_loss)  # sum over dimension 1 and then 0
     area_loss = alpha_a * area_loss
 
-    # Compute volume loss
-    volume_loss = torch.det(grad_y)
-    volume_loss = torch.mul(torch.pow(volume_loss - 1, 4), torch.pow(volume_loss, -2))
-    volume_loss = torch.sum(volume_loss)
-    volume_loss = alpha_v * volume_loss
-
     # Compute total loss
-    loss = length_loss + area_loss + volume_loss
+    loss = length_loss + area_loss
 
     return loss / batch_size
 

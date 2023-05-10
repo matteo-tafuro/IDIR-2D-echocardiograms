@@ -3,6 +3,7 @@ data/raw/*
 data/temp/*
 data/processed/*
 results/*
+output/*
 
 # exceptions to the above rules
 !data/raw/.gitkeep
