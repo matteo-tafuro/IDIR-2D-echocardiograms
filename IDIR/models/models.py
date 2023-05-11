@@ -298,7 +298,7 @@ class ImplicitRegistrator:
         self.args["method"] = 1
 
         self.args["lr"] = 0.00001
-        self.args["batch_size"] = 10000
+        self.args["batch_size"] = 4000
         self.args["layers"] = [2, 256, 256, 256, 2]
         self.args["velocity_steps"] = 1
 
@@ -314,19 +314,19 @@ class ImplicitRegistrator:
         self.args["alpha_hyper"] = 0.25
 
         self.args["bending_regularization"] = True
-        self.args["alpha_bending"] = 5
+        self.args["alpha_bending"] = 25
 
         self.args["image_shape"] = (200, 200)
 
         self.args["network"] = None
 
-        self.args["epochs"] = 2500
+        self.args["epochs"] = 250
         self.args["log_interval"] = self.args["epochs"] // 4
-        self.args["verbose"] = True
+        self.args["verbose"] = False
         self.args["save_folder"] = "output"
         self.args["save_model"] = False
 
-        self.args["network_type"] = "MLP"
+        self.args["network_type"] = "SIREN"
 
         self.args["gpu"] = torch.cuda.is_available()
         self.args["optimizer"] = "Adam"
@@ -335,7 +335,7 @@ class ImplicitRegistrator:
 
         self.args["positional_encoding"] = False
         self.args["weight_init"] = True
-        self.args["omega"] = 32
+        self.args["omega"] = 50
 
         self.args["seed"] = 1
 
